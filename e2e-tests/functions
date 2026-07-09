@@ -377,6 +377,36 @@ wait_for_pbm_operations() {
 	set_debug
 }
 
+wait_for_resync_to_start() {
+	local cluster=$1
+	local ceiling=${2:-60}
+
+	set +o xtrace
+	echo -n "waiting up to ${ceiling}s for PBM resync to start"
+	local elapsed=0
+	local op=""
+	until [[ -n ${op} && ${op} != "null" ]]; do
+		if [[ ${elapsed} -ge ${ceiling} ]]; then
+			echo ".resync was not observed, continuing"
+			set_debug
+			return
+		fi
+		echo -n .
+		sleep 5
+		elapsed=$((elapsed + 5))
+		op=$(kubectl_bin exec ${cluster}-rs0-0 -c backup-agent -- pbm status -o json -s running 2>/dev/null | jq -r .running.opID) || op=""
+	done
+	echo '.OK'
+	set_debug
+}
+
+wait_for_pbm_resync() {
+	local cluster=$1
+
+	wait_for_resync_to_start ${cluster}
+	wait_for_pbm_operations ${cluster}
+}
+
 run_restore() {
 	local backup_name=$1
 	local restore_file=${2:-$test_dir/conf/restore.yml}
@@ -1432,6 +1462,18 @@ run_pumba() {
 	kubectl_bin exec -it "$(get_pumba)" -- /pumba -l info ${cmd}
 }
 
+cert_manager_webhook_operational() {
+	cat <<-EOF | kubectl apply --dry-run=server -f - >/dev/null 2>&1
+		apiVersion: cert-manager.io/v1
+		kind: Issuer
+		metadata:
+		  name: cert-manager-webhook-probe
+		  namespace: cert-manager
+		spec:
+		  selfSigned: {}
+	EOF
+}
+
 deploy_cert_manager() {
 	desc 'deploy cert manager'
 
@@ -1445,7 +1487,18 @@ deploy_cert_manager() {
 			-p='[{"op":"add","path":"/spec/template/spec/containers/0/args/-","value":"'"$arg"'"}]'
 	done
 	kubectl_bin -n cert-manager wait pod -l app.kubernetes.io/instance=cert-manager --for=condition=ready
-	sleep 120
+	echo -n "waiting up to 120s for cert-manager webhook to become operational"
+	local elapsed=0
+	until cert_manager_webhook_operational; do
+		if [[ ${elapsed} -ge 120 ]]; then
+			echo ".webhook is still not operational, continuing anyway"
+			return
+		fi
+		echo -n .
+		sleep 5
+		elapsed=$((elapsed + 5))
+	done
+	echo '.OK'
 }
 
 delete_crd() {

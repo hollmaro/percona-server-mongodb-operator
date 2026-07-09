@@ -193,7 +193,7 @@ compare_mongo_cmd "find" "myApp:myPass@$cluster-0.$cluster.$namespace"
 compare_mongo_cmd "find" "myApp:myPass@$cluster-1.$cluster.$namespace"
 compare_mongo_cmd "find" "myApp:myPass@$cluster-2.$cluster.$namespace"
 
-sleep 60 # give PBM resync some time
+wait_for_pbm_operations "${cluster/-rs0/}"
 
 unlabel_node
 

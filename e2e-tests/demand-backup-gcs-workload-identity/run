@@ -38,8 +38,7 @@ desc 'check if all pods started'
 wait_for_running "${cluster}-rs0" 3
 wait_cluster_consistency "${cluster}"
 
-sleep 60
-wait_for_pbm_operations "${cluster}"
+wait_for_pbm_resync "${cluster}"
 
 desc 'write test data'
 run_mongo \
