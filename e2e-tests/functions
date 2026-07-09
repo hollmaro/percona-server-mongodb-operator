@@ -1683,7 +1683,8 @@ EOF
 	until [[ "$(curl -s -k -XPOST -d @payload.json "https://${user_pass}@$endpoint/v0/qan/GetReport" \
 		| jq '.rows[].sparkline')" != "null" ]]; do
 		let retry+=1
-		if [ $retry -ge 10 ]; then
+		# 28*5s keeps the old worst case: callers used to sleep 90s before polling 50s
+		if [ $retry -ge 28 ]; then
 			echo max retry count $retry reached. "No data for $service_type service type in QAN"
 			exit 1
 		fi
@@ -2557,6 +2558,47 @@ get_latest_oplog_chunk_ts() {
 format_date() {
 	local timestamp=$1
 	echo $(TZ=UTC $date -d@${timestamp} '+%Y-%m-%d %H:%M:%S')
+}
+
+wait_for_oplog_chunk_after() {
+	local cluster=$1
+	local flush_ts=$2
+	local ceiling=${3:-120}
+
+	local elapsed=0
+	local last_chunk
+	last_chunk=$(get_latest_oplog_chunk_ts ${cluster})
+	until [[ -n ${last_chunk} && ${last_chunk} != "null" && ${last_chunk} -gt ${flush_ts} ]]; do
+		if [[ ${elapsed} -ge ${ceiling} ]]; then
+			log "oplog chunk covering $(format_date ${flush_ts}) was not observed after ${ceiling}s, continuing"
+			return
+		fi
+		sleep 10
+		elapsed=$((elapsed + 10))
+		last_chunk=$(get_latest_oplog_chunk_ts ${cluster})
+	done
+	log "oplog chunk $(format_date ${last_chunk}) covers write at $(format_date ${flush_ts})"
+}
+
+wait_for_service_loadbalancers() {
+	local namespace=$1
+	local ceiling=${2:-60}
+
+	local elapsed=0
+	local pending
+	while true; do
+		pending=$(kubectl_bin get svc -n ${namespace} -o json | jq '[.items[] | select(.spec.type == "LoadBalancer") | select((.status.loadBalancer.ingress // []) | length == 0)] | length')
+		if [[ ${pending} == "0" ]]; then
+			echo "all LoadBalancer services have ingress addresses"
+			return
+		fi
+		if [[ ${elapsed} -ge ${ceiling} ]]; then
+			echo "${pending} LoadBalancer services still pending after ${ceiling}s, continuing"
+			return
+		fi
+		sleep 5
+		elapsed=$((elapsed + 5))
+	done
 }
 
 get_bucket_name() {

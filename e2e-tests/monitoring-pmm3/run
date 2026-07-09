@@ -211,7 +211,8 @@ EOF
 
 	local response
 
-	local wait_count=30
+	# 75*2s keeps the old worst case: callers used to sleep 90s before polling 60s
+	local wait_count=75
 	local retry=0
 	until [[ "$(curl -s -k -H "Authorization: Bearer ${token}" -XPOST -d @payload.json "https://$endpoint/v1/qan/metrics:getReport" \
 		| jq '.rows[].fingerprint')" ]]; do
@@ -244,7 +245,8 @@ get_metric_values() {
 		exit 1
 	fi
 
-	local wait_count=30
+	# 75*2s keeps the old worst case: callers used to sleep 90s before polling 60s
+	local wait_count=75
 	local retry=0
 	until [[ $(curl -s -k -H "Authorization: Bearer ${token}" "https://$endpoint/graph/api/datasources/proxy/1/api/v1/query_range?query=min%28$metric%7Bnode_name%3D%7E%22$instance%22%7d%20or%20$metric%7Bnode_name%3D%7E%22$instance%22%7D%29&start=$start&end=$end&step=60" \
 		| jq '.data.result[0].values[][1]' \
@@ -458,7 +460,6 @@ kubectl_bin patch secret some-users --type merge --patch '{"stringData": {"PMM_S
 
 desc 'check if all 3 Pods started'
 wait_for_running $cluster-rs0 3
-sleep 90
 
 desc 'check if pmm-client container enabled'
 compare_kubectl statefulset/$cluster-rs0
@@ -502,9 +503,7 @@ desc 'check mongos metrics'
 MONGOS_POD_NAME=$(kubectl get pod -l app.kubernetes.io/component=mongos -o jsonpath="{.items[0].metadata.name}")
 get_metric_values node_boot_time_seconds $namespace-$MONGOS_POD_NAME $NEW_TOKEN
 
-#wait for QAN
-sleep 90
-
+# QAN readiness is polled inside get_qan_values
 desc 'check QAN data'
 get_qan_values mongodb "dev-mongod" $NEW_TOKEN
 get_qan_values mongodb "dev-mongos" $NEW_TOKEN
@@ -528,8 +527,7 @@ kubectl_bin patch psmdb $cluster --type=json -p='[
 ]'
 
 wait_for_running $cluster-rs0 3
-# wait for QAN data to be collected and pushed from mongolog
-sleep 90
+# QAN readiness is polled inside get_qan_values
 
 desc 'check mongolog QAN data'
 get_qan_values mongodb "dev-mongod-mongolog" $NEW_TOKEN
