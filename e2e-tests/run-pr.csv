@@ -48,6 +48,7 @@ replset-remapping
 demand-backup
 pvc-resize
 disabled-auth
+external-dns
 non-voting-and-hidden
 demand-backup-physical-oci
 upgrade-partial-backup
