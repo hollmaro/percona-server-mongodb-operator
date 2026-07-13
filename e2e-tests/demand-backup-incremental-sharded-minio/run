@@ -113,8 +113,7 @@ sleep 5
 compare_mongos_cmd "find" "myApp:myPass@${cluster}-mongos.${namespace}" "-sharded"
 
 # wait for stable timestamp in wiredtiger
-log 'waiting 60 seconds for stable timestamp in wiredtiger'
-sleep 80
+wait_for_stable_timestamp "${cluster}-rs0-0"
 
 log 'running backups'
 backup_name_minio="backup-minio-sharded"

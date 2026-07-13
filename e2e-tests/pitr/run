@@ -75,7 +75,7 @@ check_recovery() {
 			"myApp:myPass@$cluster.$namespace"
 	fi
 	desc 'waiting for chunks to be uploaded'
-	sleep 120
+	wait_for_oplog_chunk_after "$cluster_name" "$(date +%s)"
 
 	desc "check restore by $restore_type"
 	if [ -z "$backupSource" ]; then
@@ -143,7 +143,7 @@ run_recovery_check_namespace_remap() {
 		"myApp:myPass@$cluster.$namespace"
 
 	desc 'waiting for chunks to be uploaded'
-	sleep 120
+	wait_for_oplog_chunk_after "$cluster_name" "$(date +%s)"
 
 	run_mongo \
 		"use $database\n db.$dst_collection.drop()" \

@@ -177,7 +177,7 @@ kubectl_bin patch psmdb ${cluster} -n ${namespace} --type=merge -p '
   }
 }'
 
-sleep 300
+wait_for_cluster_leave_ready ${cluster} 300
 wait_cluster_consistency ${cluster}
 
 desc "Verify merged CA bundle"

@@ -63,7 +63,7 @@ kubectl_bin apply \
 
 yq ".spec.template.spec.volumes[0].secret.secretName=\"$cluster-ssl\"" \
 	"$conf_dir/client_with_tls.yml" | kubectl_bin apply -f -
-sleep 90
+wait_for_pmm_api monitoring-service 90
 
 desc "create first PSMDB cluster $cluster"
 apply_cluster "$test_dir/conf/$cluster-rs0.yml"
@@ -95,8 +95,6 @@ kubectl_bin patch secret some-users --type merge --patch '{"stringData": {"PMM_S
 
 desc 'check if all 3 Pods started'
 wait_for_running $cluster-rs0 3
-# wait for prometheus
-sleep 90
 
 desc 'check if pmm-client container enabled'
 compare_kubectl statefulset/$cluster-rs0
@@ -106,20 +104,18 @@ compare_kubectl statefulset/$cluster-cfg
 compare_kubectl statefulset/$cluster-mongos
 
 desc 'check mongod metrics'
-get_metric_values node_boot_time_seconds $namespace-$cluster-rs0-1 admin:admin
-get_metric_values mongodb_connections $namespace-$cluster-rs0-1 admin:admin
+retry 45 2 get_metric_values node_boot_time_seconds $namespace-$cluster-rs0-1 admin:admin
+retry 45 2 get_metric_values mongodb_connections $namespace-$cluster-rs0-1 admin:admin
 
 desc 'check mongo config  metrics'
-get_metric_values node_boot_time_seconds $namespace-$cluster-cfg-1 admin:admin
-get_metric_values mongodb_connections $namespace-$cluster-cfg-1 admin:admin
+retry 45 2 get_metric_values node_boot_time_seconds $namespace-$cluster-cfg-1 admin:admin
+retry 45 2 get_metric_values mongodb_connections $namespace-$cluster-cfg-1 admin:admin
 
 desc 'check mongos metrics'
 MONGOS_POD_NAME=$(kubectl get pod -l app.kubernetes.io/component=mongos -o jsonpath="{.items[0].metadata.name}")
-get_metric_values node_boot_time_seconds $namespace-$MONGOS_POD_NAME admin:admin
+retry 45 2 get_metric_values node_boot_time_seconds $namespace-$MONGOS_POD_NAME admin:admin
 #get_metric_values mongodb_mongos_connections ${cluster%%-rs0}-mongos-0
 
-# wait for QAN
-sleep 90
 
 desc 'check QAN data'
 get_qan_values mongodb "dev-mongod" admin:admin
