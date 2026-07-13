@@ -431,7 +431,7 @@ kubectl_bin apply \
 
 yq ".spec.template.spec.volumes[0].secret.secretName=\"$cluster-ssl\"" \
 	"$conf_dir/client_with_tls.yml" | kubectl_bin apply -f -
-sleep 90
+wait_for_pmm_api monitoring-service 90
 
 desc "create first PSMDB cluster $cluster"
 custom_cluster_name="super-custom"
