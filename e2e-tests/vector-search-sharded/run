@@ -151,8 +151,7 @@ main() {
 	check_vector_search "myApp:myPass@${cluster}-mongos.${namespace}"
 
 	desc 'wait for pbm to be ready'
-	sleep 60 # give time for resync to start
-	wait_for_pbm_operations "${cluster}"
+	wait_for_pbm_resync "${cluster}"
 
 	desc 'run logical backup'
 	backup_name="backup-minio"

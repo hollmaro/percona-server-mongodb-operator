@@ -40,7 +40,8 @@ main() {
 	kubectl_bin apply -f "$test_dir/conf/some-name-ssl-internal.yml"
 	kubectl_bin apply -f "$test_dir/conf/some-name-ssl.yml"
 	deploy_cmctl
-	sleep 60
+	kubectl wait --for=condition=Ready --timeout=60s \
+		certificate/some-name-ca-cert certificate/some-name-ssl-internal certificate/some-name-ssl || :
 
 	cluster="some-name"
 	desc "create first PSMDB cluster $cluster"

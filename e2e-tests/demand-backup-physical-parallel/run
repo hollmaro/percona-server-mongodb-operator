@@ -23,9 +23,7 @@ echo 'Check if all pods started'
 wait_for_running ${cluster}-rs0 3
 wait_cluster_consistency ${cluster}
 
-sleep 60 # give time for resync to start
-
-wait_for_pbm_operations ${cluster}
+wait_for_pbm_resync ${cluster}
 
 echo 'Writing test data'
 run_mongo \

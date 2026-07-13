@@ -75,8 +75,7 @@ echo 'check if all pods started'
 wait_for_running "${cluster}-rs0" 3
 wait_cluster_consistency "${cluster}"
 
-sleep 60 # give time for resync to start
-wait_for_pbm_operations "${cluster}"
+wait_for_pbm_resync "${cluster}"
 
 echo 'Writing test data'
 run_mongo_tls \
@@ -111,8 +110,7 @@ echo 'check if all pods started on new cluster'
 wait_for_running "${new_cluster}-rs0" 3
 wait_cluster_consistency "${new_cluster}"
 
-sleep 60 # give time for resync to start
-wait_for_pbm_operations "${new_cluster}"
+wait_for_pbm_resync "${new_cluster}"
 
 echo 'Restoring snapshot to new cluster using backupSource'
 run_snapshot_restore_backupsource "${backup_name}" "${new_cluster}"
@@ -134,8 +132,7 @@ echo 'check if all pods started'
 wait_for_running "${cluster}-rs0" 3
 wait_cluster_consistency "${cluster}"
 
-sleep 60 # give time for resync to start
-wait_for_pbm_operations "${cluster}"
+wait_for_pbm_resync "${cluster}"
 
 echo 'Creating app user and writing test data (encrypted)'
 run_mongo_tls \
