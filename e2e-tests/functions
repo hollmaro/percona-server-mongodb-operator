@@ -506,6 +506,13 @@ wait_for_resync_to_start() {
 	local elapsed=0
 	local op=""
 	until [[ -n ${op} && ${op} != "null" ]]; do
+		# a fast resync may never show up as a running operation;
+		# an epoch in the agent log means the config already settled
+		if kubectl_bin logs ${cluster}-rs0-0 -c backup-agent 2>/dev/null | grep -q "got epoch"; then
+			echo ".PBM got epoch, config is in sync"
+			set_debug
+			return
+		fi
 		if [[ ${elapsed} -ge ${ceiling} ]]; then
 			echo ".resync was not observed, continuing"
 			set_debug
