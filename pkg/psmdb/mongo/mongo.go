@@ -42,6 +42,9 @@ func (conf *Config) SRVURI(hostname string) string {
 }
 
 func (conf *Config) uri(scheme, hostname string) string {
+	if len(conf.Hosts) == 0 {
+		return ""
+	}
 	u := url.URL{
 		Scheme: scheme,
 		Host:   strings.Join(conf.Hosts, ","),
@@ -141,6 +144,7 @@ type Client interface {
 type ClientDatabase interface {
 	RunCommand(ctx context.Context, runCommand any, opts ...options.Lister[options.RunCmdOptions]) *mongo.SingleResult
 }
+
 type mongoClient struct {
 	*mongo.Client
 }
@@ -203,7 +207,7 @@ func (client *mongoClient) SetDefaultRWConcern(ctx context.Context, readConcern,
 // correct BSON type. MongoDB rejects {w: "1"} as a missing custom tag, so any
 // non-negative integer string is sent as an int; everything else (including
 // "majority" and custom getLastErrorModes tags) stays a string.
-func parseWriteConcernW(w string) interface{} {
+func parseWriteConcernW(w string) any {
 	if n, err := strconv.Atoi(w); err == nil && n >= 0 {
 		return n
 	}
@@ -730,7 +734,7 @@ func (client *mongoClient) UpdateUserPass(ctx context.Context, db, name, pass st
 func (client *mongoClient) UpdateUser(ctx context.Context, currName, newName, pass string) error {
 	mu := struct {
 		Users []struct {
-			Roles interface{} `bson:"roles"`
+			Roles any `bson:"roles"`
 		} `bson:"users"`
 	}{}
 

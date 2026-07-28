@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/client-go/kubernetes/scheme"
-	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/client/fake"
 
@@ -115,7 +114,7 @@ func TestMongosHost(t *testing.T) {
 			},
 			useInternal:  true,
 			exposeType:   corev1.ServiceTypeLoadBalancer,
-			expectedHost: "10.0.0.20:27018",
+			expectedHost: "test-cluster-mongos.default.svc.cluster.local:27018",
 		},
 		"err: clusterip service type and port not found": {
 			init: func(cl client.Client) {
@@ -229,7 +228,7 @@ func TestExternalService(t *testing.T) {
 							Name:        "mongodb",
 							Port:        27017,
 							TargetPort:  intstr.FromInt(27017),
-							AppProtocol: ptr.To("mongo"),
+							AppProtocol: new("mongo"),
 						},
 					},
 					Selector: map[string]string{"statefulset.kubernetes.io/pod-name": "test-cr-rs0-0"},
@@ -282,7 +281,7 @@ func TestExternalService(t *testing.T) {
 							Name:        "mongodb",
 							Port:        27017,
 							TargetPort:  intstr.FromInt(27017),
-							AppProtocol: ptr.To("mongo"),
+							AppProtocol: new("mongo"),
 						},
 					},
 					Selector:              map[string]string{"statefulset.kubernetes.io/pod-name": "test-cr-rs0-0"},
@@ -304,7 +303,7 @@ func TestExternalService(t *testing.T) {
 							"percona.com/test": "annotation",
 						},
 						ExposeType:               corev1.ServiceTypeLoadBalancer,
-						LoadBalancerClass:        ptr.To("eks.amazonaws.com/nlb"),
+						LoadBalancerClass:        new("eks.amazonaws.com/nlb"),
 						LoadBalancerSourceRanges: []string{"10.0.0.0/16"},
 					},
 				},
@@ -338,13 +337,13 @@ func TestExternalService(t *testing.T) {
 							Name:        "mongodb",
 							Port:        27017,
 							TargetPort:  intstr.FromInt(27017),
-							AppProtocol: ptr.To("mongo"),
+							AppProtocol: new("mongo"),
 						},
 					},
 					Selector:                 map[string]string{"statefulset.kubernetes.io/pod-name": "test-cr-rs0-0"},
 					Type:                     corev1.ServiceTypeLoadBalancer,
 					ExternalTrafficPolicy:    corev1.ServiceExternalTrafficPolicyLocal,
-					LoadBalancerClass:        ptr.To("eks.amazonaws.com/nlb"),
+					LoadBalancerClass:        new("eks.amazonaws.com/nlb"),
 					LoadBalancerSourceRanges: []string{"10.0.0.0/16"},
 				},
 			},
@@ -388,6 +387,7 @@ func TestExternalService(t *testing.T) {
 						"percona.com/test":                          "annotation",
 						"external-dns.alpha.kubernetes.io/hostname": "prod-rs0-0.mongo.example.com",
 						"external-dns.alpha.kubernetes.io/ttl":      "300",
+						"percona.com/external-dns-managed":          "true",
 					},
 				},
 				Spec: corev1.ServiceSpec{
@@ -397,7 +397,7 @@ func TestExternalService(t *testing.T) {
 							Name:        "mongodb",
 							Port:        27017,
 							TargetPort:  intstr.FromInt(27017),
-							AppProtocol: ptr.To("mongo"),
+							AppProtocol: new("mongo"),
 						},
 					},
 					Selector:              map[string]string{"statefulset.kubernetes.io/pod-name": "test-cr-rs0-0"},
@@ -439,6 +439,7 @@ func TestExternalService(t *testing.T) {
 					},
 					Annotations: map[string]string{
 						"external-dns.alpha.kubernetes.io/hostname": "staging-rs0-2.db.example.com",
+						"percona.com/external-dns-managed":          "true",
 					},
 				},
 				Spec: corev1.ServiceSpec{
@@ -448,7 +449,7 @@ func TestExternalService(t *testing.T) {
 							Name:        "mongodb",
 							Port:        27017,
 							TargetPort:  intstr.FromInt(27017),
-							AppProtocol: ptr.To("mongo"),
+							AppProtocol: new("mongo"),
 						},
 					},
 					Selector:              map[string]string{"statefulset.kubernetes.io/pod-name": "test-cr-rs0-2"},

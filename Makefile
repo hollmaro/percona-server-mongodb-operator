@@ -14,10 +14,14 @@ all: build
 help: ## Display this help.
 	@awk 'BEGIN {FS = ":.*##"; printf "\nUsage:\n  make \033[36m<target>\033[0m\n"} /^[a-zA-Z_0-9-]+:.*?##/ { printf "  \033[36m%-15s\033[0m %s\n", $$1, $$2 } /^##@/ { printf "\n\033[1m%s\033[0m\n", substr($$0, 5) } ' $(MAKEFILE_LIST)
 
-generate: controller-gen mockgen  ## Generate CRDs and RBAC files
+generate: controller-gen mockgen go-fix ## Generate CRDs and RBAC files
 	go generate ./...
 	$(CONTROLLER_GEN) crd:maxDescLen=0,allowDangerousTypes=true rbac:roleName=$(NAME) webhook paths="./..." output:crd:artifacts:config=config/crd/bases  ## Generate WebhookConfiguration, Role and CustomResourceDefinition objects.
 	$(CONTROLLER_GEN) object paths="./..." ## Generate code containing DeepCopy, DeepCopyInto, and DeepCopyObject method implementations.
+
+.PHONY: go-fix
+go-fix: ## Run go fix on all packages
+	go fix ./...
 
 $(DEPLOYDIR)/crd.yaml: kustomize generate
 	$(KUSTOMIZE) build config/crd/ > $(DEPLOYDIR)/crd.yaml
@@ -123,6 +127,7 @@ release: manifests
 		-e "/^  backup:/,/^    image:/{s#image: .*#image: $(IMAGE_BACKUP)#}" \
 		-e "s#initImage: .*#initImage: percona/percona-server-mongodb-operator:$(VERSION)#g" \
 		-e "/^  logcollector:/,/^    image:/{s#image: .*#image: $(IMAGE_LOGCOLLECTOR)#}" \
+		-e "/^#  search:/,/^    image:/{s#image: .*#image: $(IMAGE_SEARCH)#}" \
 		-e "/^  pmm:/,/^    image:/{s#image: .*#image: $(IMAGE_PMM3_CLIENT)#}" deploy/cr.yaml
 	$(SED) -i \
 		-e "s|perconalab/percona-server-mongodb-operator:main-mongod8.0|$(IMAGE_MONGOD80)|g" \
@@ -147,6 +152,7 @@ after-release: update-version manifests
 		-e "/^  backup:/,/^    image:/{s#image: .*#image: perconalab/percona-server-mongodb-operator:main-backup#}" \
 		-e "s#initImage: .*#initImage: perconalab/percona-server-mongodb-operator:main#g" \
 		-e "/^  logcollector:/,/^    image:/{s#image: .*#image: perconalab/fluentbit:main-logcollector#}" \
+		-e "/^#  search:/,/^    image:/{s#image: .*#image: perconalab/percona-server-mongodb-operator:main-mongot#}" \
 		-e "/^  pmm:/,/^    image:/{s#image: .*#image: perconalab/pmm-client:3-dev-latest#}" deploy/cr.yaml
 	$(SED) -i \
 		-e "s|$(IMAGE_MONGOD80)|perconalab/percona-server-mongodb-operator:main-mongod8.0|g" \

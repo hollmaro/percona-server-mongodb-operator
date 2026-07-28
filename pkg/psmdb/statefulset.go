@@ -3,6 +3,7 @@ package psmdb
 import (
 	"context"
 	"fmt"
+	"maps"
 	"path"
 	"sort"
 	"strconv"
@@ -12,7 +13,6 @@ import (
 	appsv1 "k8s.io/api/apps/v1"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/utils/ptr"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/percona/percona-server-mongodb-operator/pkg/apis/psmdb/v1"
@@ -158,9 +158,7 @@ func StatefulSpec(ctx context.Context, cr *api.PerconaServerMongoDB, replset *ap
 	}
 
 	customLabels := make(map[string]string, len(ls))
-	for k, v := range ls {
-		customLabels[k] = v
-	}
+	maps.Copy(customLabels, ls)
 
 	for k, v := range multiAZ.Labels {
 		if _, ok := customLabels[k]; !ok {
@@ -415,7 +413,7 @@ func StatefulSpec(ctx context.Context, cr *api.PerconaServerMongoDB, replset *ap
 							LocalObjectReference: corev1.LocalObjectReference{
 								Name: name,
 							},
-							Optional: ptr.To(true),
+							Optional: new(true),
 						},
 					},
 				})
@@ -448,7 +446,7 @@ func StatefulSpec(ctx context.Context, cr *api.PerconaServerMongoDB, replset *ap
 					LocalObjectReference: corev1.LocalObjectReference{
 						Name: name,
 					},
-					Optional: ptr.To(true),
+					Optional: new(true),
 				},
 			},
 		})
@@ -637,8 +635,13 @@ func backupAgentContainer(ctx context.Context, cr *api.PerconaServerMongoDB, rep
 		c.Env[0].ValueFrom.SecretKeyRef.Key = "MONGODB_BACKUP_USER"
 		c.Env[1].ValueFrom.SecretKeyRef.Key = "MONGODB_BACKUP_PASSWORD"
 	}
+
 	if cr.CompareVersion("1.23.0") >= 0 && ShouldSetAWSSDKChecksumEnvVars(cr) {
 		c.Env = append(c.Env, AWSSDKChecksumEnvVars()...)
+	}
+
+	if cr.CompareVersion("1.23.0") >= 0 && ShouldSetOCIResourcePrincipalEnvVars(cr) {
+		c.Env = append(c.Env, OCIResourcePrincipalEnvVars(cr)...)
 	}
 
 	if cr.Spec.Sharding.Enabled {
@@ -720,6 +723,46 @@ func ShouldSetAWSSDKChecksumEnvVars(cr *api.PerconaServerMongoDB) bool {
 	return false
 }
 
+func ShouldSetOCIResourcePrincipalEnvVars(cr *api.PerconaServerMongoDB) bool {
+	pbm2150OrNewer, err := cr.ComparePBMAgentVersion("2.15.0")
+	if err != nil || pbm2150OrNewer < 0 {
+		return false
+	}
+
+	for _, storage := range cr.Spec.Backup.Storages {
+		if storage.Type == api.BackupStorageOCI && storage.OCI.Credentials.Type == api.AuthTypeOkeWorkloadIdentity {
+			return true
+		}
+	}
+
+	return false
+}
+
+const OCIResourcePrincipalVersion = "2.2"
+
+func OCIResourcePrincipalEnvVars(cr *api.PerconaServerMongoDB) []corev1.EnvVar {
+	var oci api.BackupStorageOCISpec
+	for _, storage := range cr.Spec.Backup.Storages {
+		if storage.Type == api.BackupStorageOCI && storage.OCI.Credentials.Type == api.AuthTypeOkeWorkloadIdentity {
+			oci = storage.OCI
+			break
+		}
+	}
+
+	return []corev1.EnvVar{
+		{
+			Name:  "OCI_RESOURCE_PRINCIPAL_VERSION",
+			Value: OCIResourcePrincipalVersion,
+		},
+		{
+			// if user defines more than one OCI storages and tries to use okeWorkloadIdentity for them
+			// all storages need to be in same region
+			Name:  "OCI_RESOURCE_PRINCIPAL_REGION",
+			Value: oci.Region,
+		},
+	}
+}
+
 func BuildMongoDBURI(ctx context.Context, tlsEnabled bool, sslSecret *corev1.Secret) string {
 	uri := "mongodb://$(PBM_AGENT_MONGODB_USERNAME):$(PBM_AGENT_MONGODB_PASSWORD)@localhost:$(PBM_MONGODB_PORT)"
 	if tlsEnabled {
@@ -785,9 +828,7 @@ func PodAffinity(cr *api.PerconaServerMongoDB, af *api.PodAffinity, labels map[s
 	}
 
 	labelsCopy := make(map[string]string)
-	for k, v := range labels {
-		labelsCopy[k] = v
-	}
+	maps.Copy(labelsCopy, labels)
 
 	switch {
 	case af.Advanced != nil:
