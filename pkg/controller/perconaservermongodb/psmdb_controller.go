@@ -6,6 +6,7 @@ import (
 	stderrors "errors"
 	"fmt"
 	"io"
+	"maps"
 	"os"
 	"sort"
 	"strings"
@@ -13,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	cm "github.com/cert-manager/cert-manager/pkg/apis/certmanager/v1"
 	v "github.com/hashicorp/go-version"
 	"github.com/pkg/errors"
 	"github.com/robfig/cron/v3"
@@ -464,7 +466,11 @@ func (r *ReconcilePerconaServerMongoDB) Reconcile(ctx context.Context, request r
 			err = nil
 			return rr, nil
 		}
-		err = errors.Errorf(`TLS secrets handler: "%v". Please create your TLS secret `+api.SSLSecretName(cr)+` manually or setup cert-manager correctly`, err)
+		errString := `TLS secrets handler: "%v". Please create your TLS secret ` + api.SSLSecretName(cr) + ` manually or setup cert-manager correctly`
+		if cr.Spec.TLS.IssuerConf.Kind == cm.ClusterIssuerKind {
+			errString += ". Make sure the operator has permissions for ClusterIssuer resources, or create the ClusterIssuer manually."
+		}
+		err = errors.Errorf(errString, err)
 		return reconcile.Result{}, err
 	}
 
@@ -645,9 +651,7 @@ func (r *ReconcilePerconaServerMongoDB) reconcileReplsets(ctx context.Context, c
 
 		if rs, ok := cr.Status.Replsets[replset.Name]; ok {
 			rs.Members = make(map[string]api.ReplsetMemberStatus)
-			for pod, member := range members {
-				rs.Members[pod] = member
-			}
+			maps.Copy(rs.Members, members)
 			cr.Status.Replsets[replset.Name] = rs
 		}
 	}
@@ -1042,8 +1046,8 @@ func (r *ReconcilePerconaServerMongoDB) deleteOrphanPVCs(ctx context.Context, cr
 				mongodPodsMap[pod.Name] = true
 			}
 			for _, pvc := range mongodPVCs.Items {
-				if strings.HasPrefix(pvc.Name, psmdbconfig.MongodDataVolClaimName+"-") {
-					podName := strings.TrimPrefix(pvc.Name, psmdbconfig.MongodDataVolClaimName+"-")
+				if after, ok := strings.CutPrefix(pvc.Name, psmdbconfig.MongodDataVolClaimName+"-"); ok {
+					podName := after
 					if _, ok := mongodPodsMap[podName]; !ok {
 						// remove the orphan pvc
 						logf.FromContext(ctx).Info("remove orphan pvc", "pvc", pvc.Name)
@@ -1552,9 +1556,7 @@ func (r *ReconcilePerconaServerMongoDB) reconcileMongosStatefulset(ctx context.C
 		templateSpec.Annotations = make(map[string]string)
 	}
 
-	for k, v := range sslAnn {
-		templateSpec.Annotations[k] = v
-	}
+	maps.Copy(templateSpec.Annotations, sslAnn)
 
 	secret := new(corev1.Secret)
 	err = r.client.Get(ctx, types.NamespacedName{Name: api.UserSecretName(cr), Namespace: cr.Namespace}, secret)
@@ -1635,7 +1637,8 @@ func (r *ReconcilePerconaServerMongoDB) currentSSLAnnotation(ctx context.Context
 	}
 
 	sfsList := appsv1.StatefulSetList{}
-	if err := r.client.List(ctx, &sfsList,
+	if err := r.client.List(
+		ctx, &sfsList,
 		&client.ListOptions{
 			Namespace: cr.Namespace,
 			LabelSelector: labels.SelectorFromSet(map[string]string{
@@ -1817,12 +1820,29 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSvc(ctx context.Context, c
 	}
 
 	if saveOldMeta {
-		svc.SetAnnotations(util.MapMerge(oldSvc.GetAnnotations(), svc.GetAnnotations()))
+		oldAnnotations := oldSvc.GetAnnotations()
+		removeStaleExternalDNSAnnotations(oldAnnotations, svc.GetAnnotations())
+		svc.SetAnnotations(util.MapMerge(oldAnnotations, svc.GetAnnotations()))
 		svc.SetLabels(util.MapMerge(oldSvc.GetLabels(), svc.GetLabels()))
 	}
 	setIgnoredAnnotations(cr, svc, oldSvc)
 	setIgnoredLabels(cr, svc, oldSvc)
 	return r.createOrUpdate(ctx, svc)
+}
+
+func removeStaleExternalDNSAnnotations(oldAnnotations, desired map[string]string) {
+	if oldAnnotations[naming.AnnotationExternalDNSManaged] == "" && desired[naming.AnnotationExternalDNSManaged] == "" {
+		return
+	}
+	for _, k := range []string{
+		naming.AnnotationExternalDNSHostname,
+		naming.AnnotationExternalDNSTTL,
+		naming.AnnotationExternalDNSManaged,
+	} {
+		if _, ok := desired[k]; !ok {
+			delete(oldAnnotations, k)
+		}
+	}
 }
 
 func setIgnoredAnnotations(cr *api.PerconaServerMongoDB, obj, oldObject client.Object) {

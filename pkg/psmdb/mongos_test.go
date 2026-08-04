@@ -10,7 +10,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/intstr"
 	"k8s.io/apimachinery/pkg/util/yaml"
-	"k8s.io/utils/ptr"
 
 	api "github.com/percona/percona-server-mongodb-operator/pkg/apis/psmdb/v1"
 	"github.com/percona/percona-server-mongodb-operator/pkg/version"
@@ -40,7 +39,7 @@ func TestMongosService(t *testing.T) {
 						Name:        "mongos",
 						Port:        27017,
 						TargetPort:  intstr.FromInt(27017),
-						AppProtocol: ptr.To("mongo"),
+						AppProtocol: new("mongo"),
 					},
 				},
 				Selector: map[string]string{
@@ -71,7 +70,7 @@ func TestMongosService(t *testing.T) {
 						Name:        "mongos",
 						Port:        27017,
 						TargetPort:  intstr.FromInt(27017),
-						AppProtocol: ptr.To("mongo"),
+						AppProtocol: new("mongo"),
 					},
 				},
 				Selector: map[string]string{
@@ -94,7 +93,7 @@ func TestMongosService(t *testing.T) {
 					"percona.com/test": "annotation",
 				},
 				ExposeType:               corev1.ServiceTypeLoadBalancer,
-				LoadBalancerClass:        ptr.To("eks.amazonaws.com/nlb"),
+				LoadBalancerClass:        new("eks.amazonaws.com/nlb"),
 				LoadBalancerSourceRanges: []string{"10.0.0.0/16"},
 			},
 			podName: "test-cr-mongos-0",
@@ -105,7 +104,7 @@ func TestMongosService(t *testing.T) {
 						Name:        "mongos",
 						Port:        27017,
 						TargetPort:  intstr.FromInt(27017),
-						AppProtocol: ptr.To("mongo"),
+						AppProtocol: new("mongo"),
 					},
 				},
 				Selector: map[string]string{
@@ -117,7 +116,7 @@ func TestMongosService(t *testing.T) {
 				},
 				Type:                     corev1.ServiceTypeLoadBalancer,
 				ExternalTrafficPolicy:    corev1.ServiceExternalTrafficPolicyLocal,
-				LoadBalancerClass:        ptr.To("eks.amazonaws.com/nlb"),
+				LoadBalancerClass:        new("eks.amazonaws.com/nlb"),
 				LoadBalancerSourceRanges: []string{"10.0.0.0/16"},
 			},
 		},
@@ -170,7 +169,7 @@ func TestMongosContainer(t *testing.T) {
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: "test-configmap",
 				},
-				Optional: ptr.To(false),
+				Optional: new(false),
 			},
 		},
 		{
@@ -178,7 +177,7 @@ func TestMongosContainer(t *testing.T) {
 				LocalObjectReference: corev1.LocalObjectReference{
 					Name: "test-secret",
 				},
-				Optional: ptr.To(true),
+				Optional: new(true),
 			},
 		},
 	}
@@ -267,4 +266,82 @@ func readDefaultCR(name, namespace string) (*api.PerconaServerMongoDB, error) {
 	cr.Namespace = namespace
 	cr.Spec.InitImage = "perconalab/percona-server-mongodb-operator:main"
 	return cr, nil
+}
+
+func TestMongosServiceAnnotations(t *testing.T) {
+	tests := map[string]struct {
+		expose              api.MongosExpose
+		svcName             string
+		expectedAnnotations map[string]string
+	}{
+		"externalDNS single service: hostname without pod index": {
+			expose: api.MongosExpose{
+				Expose: api.Expose{
+					ExposeType: corev1.ServiceTypeLoadBalancer,
+					ExternalDNS: &api.ExternalDNSConfig{
+						Prefix: "prod",
+						Domain: "mongo.example.com",
+						TTL:    120,
+					},
+				},
+			},
+			svcName: "test-cr-mongos",
+			expectedAnnotations: map[string]string{
+				"external-dns.alpha.kubernetes.io/hostname": "prod-mongos.mongo.example.com",
+				"external-dns.alpha.kubernetes.io/ttl":      "120",
+				"percona.com/external-dns-managed":          "true",
+			},
+		},
+		"externalDNS servicePerPod: hostname with pod index": {
+			expose: api.MongosExpose{
+				ServicePerPod: true,
+				Expose: api.Expose{
+					ExposeType: corev1.ServiceTypeLoadBalancer,
+					ExternalDNS: &api.ExternalDNSConfig{
+						Prefix: "prod",
+						Domain: "mongo.example.com",
+					},
+				},
+			},
+			svcName: "test-cr-mongos-2",
+			expectedAnnotations: map[string]string{
+				"external-dns.alpha.kubernetes.io/hostname": "prod-mongos-2.mongo.example.com",
+				"percona.com/external-dns-managed":          "true",
+			},
+		},
+		"no externalDNS: only user annotations": {
+			expose: api.MongosExpose{
+				Expose: api.Expose{
+					ExposeType: corev1.ServiceTypeLoadBalancer,
+					ServiceAnnotations: map[string]string{
+						"percona.com/test": "annotation",
+					},
+				},
+			},
+			svcName: "test-cr-mongos",
+			expectedAnnotations: map[string]string{
+				"percona.com/test": "annotation",
+			},
+		},
+	}
+	for name, tt := range tests {
+		t.Run(name, func(t *testing.T) {
+			cr := &api.PerconaServerMongoDB{
+				ObjectMeta: metav1.ObjectMeta{
+					Name:      "test-cr",
+					Namespace: "test-ns",
+				},
+				Spec: api.PerconaServerMongoDBSpec{
+					CRVersion: version.Version(),
+					Sharding: api.Sharding{
+						Mongos: &api.MongosSpec{
+							Expose: tt.expose,
+						},
+					},
+				},
+			}
+			svc := MongosService(cr, tt.svcName)
+			assert.Equal(t, tt.expectedAnnotations, svc.Annotations)
+		})
+	}
 }

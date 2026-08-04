@@ -28,13 +28,7 @@ kubectl_bin apply \
 	-f "$conf_dir/client.yml"
 
 apply_s3_storage_secrets
-if version_gt "1.19" && [ $EKS -ne 1 ]; then
-	cat "$conf_dir/container-rc.yaml" | $sed 's/docker/runc/g' | kubectl_bin apply -f -
-elif version_gt "1.24" && [ $EKS -eq 1 ]; then
-	cat "$conf_dir/container-rc.yaml" | $sed 's/docker/runc/g' | kubectl_bin apply -f -
-else
-	kubectl_bin apply -f "$conf_dir/container-rc.yaml"
-fi
+create_runtime_class
 
 apply_cluster "$test_dir/conf/$cluster-rs0.yml"
 desc 'check if all 3 Pods started'
@@ -164,10 +158,12 @@ sleep 5
 if [ -z "$SKIP_BACKUPS_TO_AWS_GCP_AZURE" ]; then
 	desc 'check backup and restore -- aws-s3'
 	backup_dest_aws=$(get_backup_dest "$backup_name_aws")
+	_aws_env_save
 	setup_aws_credentials
 	check_backup_existence_aws "$backup_dest_aws" "/rs0/myApp.test.gz"
 	check_backup_existence_aws "$backup_dest_aws" "/rs1/myApp1.test.gz"
 	check_backup_existence_aws "$backup_dest_aws" "/rs2/myApp2.test.gz"
+	_aws_env_restore
 	insert_data_mongos "100501" "myApp" "" "$custom_port"
 	insert_data_mongos "100501" "myApp1" "" "$custom_port"
 	insert_data_mongos "100501" "myApp2" "" "$custom_port"
@@ -233,9 +229,7 @@ check_data
 desc 'delete backup and check if it is removed from bucket -- minio'
 kubectl_bin delete psmdb-backup --all
 
-backup_exists=$(kubectl_bin run -i --rm aws-cli --image=docker.io/perconalab/awscli --restart=Never -- \
-	/usr/bin/env AWS_ACCESS_KEY_ID=some-access-key AWS_SECRET_ACCESS_KEY=some-secret-key AWS_DEFAULT_REGION=us-east-1 \
-	/usr/bin/aws --endpoint-url http://minio-service:9000 s3 ls s3://operator-testing/ \
+backup_exists=$(aws_cli_minio http://minio-service:9000 s3 ls s3://operator-testing/ \
 	| grep -c ${backup_dest_minio}_ | cat)
 if [[ $backup_exists -eq 1 ]]; then
 	echo "Backup was not removed from bucket -- minio"
@@ -253,6 +247,5 @@ fi
 # desc 'check for passwords leak'
 # check_passwords_leak
 
-kubectl_bin delete -f "$conf_dir/container-rc.yaml"
 destroy "$namespace"
 desc 'test passed'

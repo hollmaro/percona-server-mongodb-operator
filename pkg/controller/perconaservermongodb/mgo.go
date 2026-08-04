@@ -20,7 +20,6 @@ import (
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
-	"k8s.io/utils/ptr"
 	logf "sigs.k8s.io/controller-runtime/pkg/log"
 
 	api "github.com/percona/percona-server-mongodb-operator/pkg/apis/psmdb/v1"
@@ -56,7 +55,16 @@ func shouldSetDefaultRWConcern(cr *api.PerconaServerMongoDB, replset *api.Replse
 	if cr.Spec.Sharding.Enabled {
 		return false
 	}
-	return replset.Arbiter.Enabled || cr.Spec.DefaultRWConcern != nil
+
+	externalArbiterFound := false
+	for _, ext := range replset.ExternalNodes {
+		if ext.ArbiterOnly {
+			externalArbiterFound = true
+			break
+		}
+	}
+
+	return replset.Arbiter.Enabled || externalArbiterFound || cr.Spec.DefaultRWConcern != nil
 }
 
 func (r *ReconcilePerconaServerMongoDB) reconcileCluster(ctx context.Context, cr *api.PerconaServerMongoDB, replset *api.ReplsetSpec, mongosPods []corev1.Pod) (api.AppState, map[string]api.ReplsetMemberStatus, error) {
@@ -260,7 +268,7 @@ func (r *ReconcilePerconaServerMongoDB) reconcileCluster(ctx context.Context, cr
 				log.Info("added to shard", "rs", rsName)
 			}
 
-			rsStatus.AddedAsShard = ptr.To(true)
+			rsStatus.AddedAsShard = new(true)
 			cr.Status.Replsets[replset.Name] = rsStatus
 		} else {
 			return api.AppStateInit, nil, nil
@@ -370,11 +378,7 @@ func (r *ReconcilePerconaServerMongoDB) getConfigMemberForExternalNode(id int, e
 		member.Tags = mongo.ReplsetTags{"external": "true"}
 	}
 
-	if strings.Contains(extNode.Host, ":") {
-		member.Host = extNode.Host
-	} else {
-		member.Host = extNode.HostPort()
-	}
+	member.Host = extNode.HostPort()
 
 	for k, v := range extNode.Tags {
 		if member.Tags == nil {
@@ -540,22 +544,37 @@ func (r *ReconcilePerconaServerMongoDB) updateConfigMembers(ctx context.Context,
 		return rsMembers, 0, errors.Wrap(err, "unable to get replset members")
 	}
 
-	liveMembers := 0
+	liveMembers := countLiveMembers(rsStatus, cnf, rs, rsMembers)
+
+	return rsMembers, liveMembers, nil
+}
+
+// countLiveMembers counts the members reported as live (primary, secondary or
+// arbiter) in the replset status, ignoring external members and external
+// arbiters. It also populates rsMembers with the status of every member that
+// maps to an operator-managed pod (identified by the podName tag).
+func countLiveMembers(rsStatus mongo.Status, cnf mongo.RSConfig, rs *api.ReplsetSpec, rsMembers map[string]api.ReplsetMemberStatus) int {
+	count := 0
 	for _, member := range rsStatus.Members {
-		var tags mongo.ReplsetTags
+		var cm mongo.ConfigMember
 
 		for i := range cnf.Members {
 			if member.Id == cnf.Members[i].ID {
-				tags = cnf.Members[i].Tags
+				cm = cnf.Members[i]
 				break
 			}
 		}
 
-		if _, ok := tags["external"]; ok {
+		if _, ok := cm.Tags["external"]; ok {
 			continue
 		}
 
-		if podName, ok := tags["podName"]; ok {
+		// arbiters can't have tags
+		if cm.ArbiterOnly && isExternalArbiter(cm, rs) {
+			continue
+		}
+
+		if podName, ok := cm.Tags["podName"]; ok {
 			rsMembers[podName] = api.ReplsetMemberStatus{
 				Name:     member.Name,
 				State:    member.State,
@@ -565,11 +584,25 @@ func (r *ReconcilePerconaServerMongoDB) updateConfigMembers(ctx context.Context,
 
 		switch member.State {
 		case mongo.MemberStatePrimary, mongo.MemberStateSecondary, mongo.MemberStateArbiter:
-			liveMembers++
+			count++
 		}
 	}
 
-	return rsMembers, liveMembers, nil
+	return count
+}
+
+func isExternalArbiter(cm mongo.ConfigMember, rs *api.ReplsetSpec) bool {
+	for _, extNode := range rs.ExternalNodes {
+		if !extNode.ArbiterOnly {
+			continue
+		}
+
+		if cm.Host == extNode.HostPort() {
+			return true
+		}
+	}
+
+	return false
 }
 
 func inShard(ctx context.Context, client mongo.Client, rsName string) (bool, error) {
@@ -942,7 +975,7 @@ func getRoles(cr *api.PerconaServerMongoDB, role api.SystemUserRole) []mongo.Rol
 }
 
 // compareResources compares two map[string]interface{} values and returns true if they are equal
-func compareResources(x, y map[string]interface{}) bool {
+func compareResources(x, y map[string]any) bool {
 	if len(x) != len(y) {
 		return false
 	}
@@ -1063,7 +1096,7 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSystemUsers(ctx context.Co
 	if cr.CompareVersion("1.12.0") >= 0 {
 		privileges := []mongo.RolePrivilege{
 			{
-				Resource: map[string]interface{}{
+				Resource: map[string]any{
 					"db":         "",
 					"collection": "system.profile",
 				},
@@ -1080,7 +1113,7 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSystemUsers(ctx context.Co
 		if cr.CompareVersion("1.15.0") >= 0 {
 			privileges = []mongo.RolePrivilege{
 				{
-					Resource: map[string]interface{}{
+					Resource: map[string]any{
 						"db":         "",
 						"collection": "",
 					},
@@ -1094,7 +1127,7 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSystemUsers(ctx context.Co
 					},
 				},
 				{
-					Resource: map[string]interface{}{
+					Resource: map[string]any{
 						"db":         "",
 						"collection": "system.profile",
 					},
@@ -1108,7 +1141,7 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSystemUsers(ctx context.Co
 		}
 		if cr.CompareVersion("1.16.0") >= 0 {
 			privileges = append(privileges, mongo.RolePrivilege{
-				Resource: map[string]interface{}{
+				Resource: map[string]any{
 					"db":         "admin",
 					"collection": "system.version",
 				},
@@ -1126,7 +1159,7 @@ func (r *ReconcilePerconaServerMongoDB) createOrUpdateSystemUsers(ctx context.Co
 
 	err = r.createOrUpdateSystemRoles(ctx, cli, "pbmAnyAction",
 		[]mongo.RolePrivilege{{
-			Resource: map[string]interface{}{"anyResource": true},
+			Resource: map[string]any{"anyResource": true},
 			Actions:  []string{"anyAction"},
 		}})
 	if err != nil {
